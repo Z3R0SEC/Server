@@ -11,6 +11,28 @@ const whatsapp = new Whatsapp({
         url: REDIS_URL,
         keyPrefix: "wa_bot:",
     }),
+    
+    onCallReceived: async (callEvent) => {
+        for (const call of callEvent) {
+            if (call.status === 'offer') {
+                try {
+                    const sessionId = call.sessionId;
+                    
+                    const sessionData = await whatsapp.getSessionById(sessionId);
+                    
+                    if (sessionData && sessionData.sock) {
+                        await sessionData.sock.rejectCall(call.id, call.from);
+                        console.log(`[${sessionId}] 🚫 Auto-rejected ${call.isVideo ? 'video' : 'voice'} call from ${call.from}`);
+                        
+                    }
+                } catch (err) {
+                    console.error("Failed to reject call handle:", err.message);
+                }
+            }
+        }
+    }
+});
+
     onConnecting: (sessionId) => console.log(`[${sessionId}] Connecting to WhatsApp...`),
     onConnected: (sessionId) => console.log(`[${sessionId}] Connected Successfully!`),
     onDisconnected: (sessionId) => console.log(`[${sessionId}] Disconnected!`),
@@ -64,8 +86,7 @@ const whatsapp = new Whatsapp({
                 await redisClient.lTrim(redisKey, 0, 99);
             }
 
-            await whatsapp.readMessage({ sessionId, key: msg.key });
-
+            
         } catch (err) {
             console.error("Error processing incoming message hook:", err);
         }
