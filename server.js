@@ -30,7 +30,7 @@ const whatsapp = new Whatsapp({
                 }
             }
         }
-    }
+    },
 
     onConnecting: (sessionId) => console.log(`[${sessionId}] Connecting to WhatsApp...`),
     onConnected: (sessionId) => console.log(`[${sessionId}] Connected Successfully!`),
