@@ -11,26 +11,63 @@ const whatsapp = new Whatsapp({
         url: REDIS_URL,
         keyPrefix: "wa_bot:",
     }),
-    onConnecting: (sessionId) => {
-        console.log(`[${sessionId}] Connecting to WhatsApp...`);
-    },
-    onConnected: (sessionId) => {
-        console.log(`[${sessionId}] Connected Successfully!`);
-    },
-    onDisconnected: (sessionId) => {
-        console.log(`[${sessionId}] Disconnected!`);
-    },
+    onConnecting: (sessionId) => console.log(`[${sessionId}] Connecting to WhatsApp...`),
+    onConnected: (sessionId) => console.log(`[${sessionId}] Connected Successfully!`),
+    onDisconnected: (sessionId) => console.log(`[${sessionId}] Disconnected!`),
     onMessageReceived: async (msg) => {
         if (msg.key.fromMe || msg.key.remoteJid?.includes("status")) return;
-        
-        console.log(`[${msg.sessionId}] New message from ${msg.key.remoteJid}`);
+
         try {
-            await whatsapp.readMessage({
-                sessionId: msg.sessionId,
-                key: msg.key,
-            });
+            const sessionId = msg.sessionId;
+            const fromNumber = msg.key.remoteJid;
+            const pushName = msg.pushName || "Unknown";
+            
+            let messagePayload = {
+                id: msg.key.id,
+                fromName: pushName,
+                number: fromNumber,
+                timestamp: Date.now()
+            };
+
+            if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
+                messagePayload.type = "text";
+                messagePayload.text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
+            } 
+            else if (msg.message?.imageMessage) {
+                messagePayload.type = "image";
+                const buffer = await msg.download?.();
+                messagePayload.url = buffer ? `data:image/jpeg;base64,${buffer.toString('base64')}` : null;
+                messagePayload.text = msg.message.imageMessage.caption || "";
+            } 
+            else if (msg.message?.videoMessage) {
+                messagePayload.type = "video";
+                const buffer = await msg.download?.();
+                messagePayload.url = buffer ? `data:video/mp4;base64,${buffer.toString('base64')}` : null;
+                messagePayload.text = msg.message.videoMessage.caption || "";
+            } 
+            else if (msg.message?.audioMessage) {
+                messagePayload.type = "audio";
+                const buffer = await msg.download?.();
+                messagePayload.url = buffer ? `data:audio/mp3;base64,${buffer.toString('base64')}` : null;
+            } 
+            else if (msg.message?.documentMessage) {
+                messagePayload.type = "document";
+                const buffer = await msg.download?.();
+                messagePayload.url = buffer ? `data:application/octet-stream;base64,${buffer.toString('base64')}` : null;
+                messagePayload.text = msg.message.documentMessage.fileName || "Document";
+            }
+
+            if (messagePayload.type) {
+                const redisClient = whatsapp.adapter.client; 
+                const redisKey = `wa_history:${sessionId}`;
+                await redisClient.lPush(redisKey, JSON.stringify(messagePayload));
+                await redisClient.lTrim(redisKey, 0, 99);
+            }
+
+            await whatsapp.readMessage({ sessionId, key: msg.key });
+
         } catch (err) {
-            console.error("Error reading message:", err.message);
+            console.error("Error processing incoming message hook:", err);
         }
     }
 });
@@ -122,6 +159,10 @@ app.post('/sendmessage', async (req, res) => {
     }
 });
 
+app.get('/', async (req, res) => {
+    return res.status(200).json({ info: "App is running!" });
+});
+
 app.get('/getsessions', async (req, res) => {
     try {
         const sessions = await whatsapp.getSessionsIds();
@@ -131,11 +172,30 @@ app.get('/getsessions', async (req, res) => {
     }
 });
 
-app.get('/getmessages', (req, res) => {
-    res.status(200).json({ 
-        message: "Notice: To build a robust history archive, listen to the 'onMessageReceived' stream inside server.js and dump incoming data payloads into your own structured production DB tier." 
-    });
+app.get('/getmessages/:sessionId', async (req, res) => {
+    const { sessionId } = req.params;
+    if (!sessionId) return res.status(400).json({ error: "Missing sessionId" });
+
+    try {
+        const redisClient = whatsapp.adapter.client;
+        const redisKey = `wa_history:${sessionId}`;
+        
+        const rawData = await redisClient.lRange(redisKey, 0, -1);
+        
+        const messages = rawData.map(item => JSON.parse(item));
+
+        res.status(200).json({
+            success: true,
+            sessionId: sessionId,
+            total: messages.length,
+            messages: messages
+        });
+    } catch (error) {
+        console.error("Fetch Messages Error:", error);
+        res.status(500).json({ error: "Failed to retrieve message logs.", details: error.message });
+    }
 });
+
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
