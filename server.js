@@ -72,6 +72,105 @@ const whatsapp = new Whatsapp({
     }
 });
 
+const APP_START_TIME = Date.now();
+app.get('/', async (req, res) => {
+    try {
+        const diffMs = Date.now() - APP_START_TIME;
+        const hours = Math.floor(diffMs / 3600000);
+        const minutes = Math.floor((diffMs % 3600000) / 60000);
+        const seconds = Math.floor(((diffMs % 3600000) % 60000) / 1000);
+        
+        let sessionCount = 0;
+        try {
+            const activeSessions = await whatsapp.getSessionsIds();
+            sessionCount = activeSessions.length;
+        } catch (e) {
+            sessionCount = "Error checking DB";
+        }
+
+        res.send(`
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>WhatsApp Gateway Status</title>
+                <style>
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                        background: #0f172a;
+                        color: #f8fafc;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        height: 100vh;
+                        margin: 0;
+                    }
+                    .card {
+                        background: #1e293b;
+                        padding: 2.5rem;
+                        border-radius: 1rem;
+                        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+                        border: 1px solid #334155;
+                        text-align: center;
+                        max-width: 400px;
+                        width: 100%;
+                    }
+                    .status-dot {
+                        height: 12px;
+                        width: 12px;
+                        background-color: #22c55e;
+                        border-radius: 50%;
+                        display: inline-block;
+                        box-shadow: 0 0 12px #22c55e;
+                        margin-right: 8px;
+                    }
+                    h1 { margin: 0 0 0.5rem 0; font-size: 1.75rem; color: #fff; }
+                    .status-container {
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        margin-bottom: 2rem;
+                        font-size: 1.1rem;
+                        color: #94a3b8;
+                    }
+                    .metric {
+                        background: #0f172a;
+                        padding: 1rem;
+                        border-radius: 0.5rem;
+                        margin-bottom: 1rem;
+                        border: 1px solid #1e293b;
+                    }
+                    .metric-title { font-size: 0.85rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+                    .metric-value { font-size: 1.25rem; font-weight: bold; margin-top: 0.25rem; color: #38bdf8; }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <h1>WA Gateway API</h1>
+                    <div class="status-container">
+                        <span class="status-dot"></span> Operational (Render Live)
+                    </div>
+                    
+                    <div class="metric">
+                        <div class="metric-title">App Run Time (Uptime)</div>
+                        <div class="metric-value">${hours}h ${minutes}m ${seconds}s</div>
+                    </div>
+
+                    <div class="metric">
+                        <div class="metric-title">Active Bot Sessions</div>
+                        <div class="metric-value">${sessionCount} connected</div>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `);
+    } catch (error) {
+        res.status(500).send("Gateway Error: Upstream service error.");
+    }
+});
+
+
 app.post('/pairing', async (req, res) => {
     const { sessionId, phoneNumber } = req.body;
     if (!sessionId || !phoneNumber) {
@@ -159,9 +258,6 @@ app.post('/sendmessage', async (req, res) => {
     }
 });
 
-app.get('/', async (req, res) => {
-    return res.status(200).json({ info: "App is running!" });
-});
 
 app.get('/getsessions', async (req, res) => {
     try {
